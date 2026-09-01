@@ -19,6 +19,8 @@
   --restart-hover: #9bbdff;
   --toggle-bg: #22223a;
   --toggle-border: #3a3a5a;
+  --highscore-highlight-bg: rgba(122, 162, 247, 0.15);
+  --highscore-highlight-border: #7aa2f7;
 }
 
 body.light-mode {
@@ -42,6 +44,8 @@ body.light-mode {
   --restart-hover: #5c78e5;
   --toggle-bg: #e4e4ee;
   --toggle-border: #c4c4d6;
+  --highscore-highlight-bg: rgba(59, 91, 219, 0.12);
+  --highscore-highlight-border: #3b5bdb;
 }
 
 *, *::before, *::after {
@@ -196,6 +200,140 @@ body {
 
 .queue-preview.hidden {
   display: none;
+}
+
+/* ---- Récords locales ---- */
+.highscores-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.highscores-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  counter-reset: highscore;
+}
+
+.highscore-row {
+  counter-increment: highscore;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--control-text);
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.highscore-row::before {
+  content: counter(highscore) '.';
+  color: var(--label-color);
+  font-weight: 600;
+}
+
+.highscore-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.highscore-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+  color: var(--value-color);
+}
+
+.highscore-new {
+  background: var(--highscore-highlight-bg);
+  border-color: var(--highscore-highlight-border);
+  color: var(--fg);
+}
+
+.highscore-empty {
+  font-size: 12px;
+  color: var(--control-text);
+  font-style: italic;
+}
+
+.highscores-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--control-text);
+}
+
+.highscores-stats strong {
+  color: var(--value-color);
+}
+
+#clear-highscores-btn {
+  margin-top: 4px;
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--kbd-border);
+  color: var(--control-text);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+#clear-highscores-btn:hover {
+  border-color: var(--overlay-title-color);
+  color: var(--overlay-title-color);
+}
+
+.overlay-highscores {
+  width: 220px;
+}
+
+/* ---- Formulario de nuevo récord ---- */
+.highscore-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.highscore-form.hidden {
+  display: none;
+}
+
+.highscore-form input {
+  background: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 14px;
+  text-align: center;
+  width: 180px;
+}
+
+.highscore-form button {
+  background: var(--restart-bg);
+  color: var(--restart-text);
+  border: none;
+  border-radius: 6px;
+  padding: 6px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.highscore-form button:hover {
+  background: var(--restart-hover);
 }
 
 /* ---- Controles ---- */
