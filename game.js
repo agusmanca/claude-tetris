@@ -26,9 +26,112 @@ const PIECES = [
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
 ];
 
+// Versión pastel de COLORS: mismos índices, tonos más claros/desaturados.
+const PASTEL_COLORS = [
+  null,
+  '#b2ebf2', // I
+  '#fff3c4', // O
+  '#e1bee7', // T
+  '#c8e6c9', // S
+  '#ffcdd2', // Z
+  '#bbdefb', // J
+  '#ffe0b2', // L
+];
+
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
 const GRID_COLORS = { dark: '#22222e', light: '#d6d6e2' };
+
+// ---- Sistema de skins visuales ----
+// Cada skin es un config object con la estrategia de dibujo de bloques
+// (`drawBlock`) y, opcionalmente, un fondo de canvas (`boardBg`) y colores de
+// grilla propios (`gridColors`, por tema). `drawBlock` recibe siempre las
+// mismas coordenadas de celda que la firma pública de `drawBlock` en game.js:
+// asume que `colorIndex` ya es válido (el llamador filtra las celdas vacías).
+const SKINS = {
+  retro: {
+    label: 'Retro',
+    boardBg: null,
+    gridColors: null,
+    // Estilo original: bloques cuadrados de color plano con un highlight superior.
+    drawBlock(context, x, y, colorIndex, size, alpha) {
+      const color = COLORS[colorIndex];
+      context.globalAlpha = alpha;
+      context.fillStyle = color;
+      context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
+      context.fillStyle = 'rgba(255,255,255,0.12)';
+      context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+      context.globalAlpha = 1;
+    },
+  },
+  neon: {
+    label: 'Neón',
+    boardBg: '#050508',
+    gridColors: { dark: '#12121c', light: '#12121c' },
+    // Fondo negro profundo y resplandor por bloque vía shadowBlur/shadowColor.
+    // save()/restore() garantiza que el shadow no "manche" el resto del render.
+    drawBlock(context, x, y, colorIndex, size, alpha) {
+      const color = COLORS[colorIndex];
+      context.save();
+      context.globalAlpha = alpha;
+      context.shadowBlur = 14;
+      context.shadowColor = color;
+      context.fillStyle = color;
+      context.fillRect(x * size + 2, y * size + 2, size - 4, size - 4);
+      // segunda pasada sin sombra para un núcleo más brillante
+      context.shadowBlur = 0;
+      context.fillStyle = 'rgba(255,255,255,0.25)';
+      context.fillRect(x * size + size / 2 - 1, y * size + 2, 2, size - 4);
+      context.restore();
+    },
+  },
+  pastel: {
+    label: 'Pastel',
+    boardBg: null,
+    gridColors: null,
+    // Paleta suave con esquinas redondeadas dibujadas a mano con arcTo.
+    drawBlock(context, x, y, colorIndex, size, alpha) {
+      const color = PASTEL_COLORS[colorIndex];
+      const r = size * 0.22;
+      const px = x * size + 1, py = y * size + 1, w = size - 2, h = size - 2;
+      context.globalAlpha = alpha;
+      context.fillStyle = color;
+      context.beginPath();
+      context.moveTo(px + r, py);
+      context.arcTo(px + w, py, px + w, py + h, r);
+      context.arcTo(px + w, py + h, px, py + h, r);
+      context.arcTo(px, py + h, px, py, r);
+      context.arcTo(px, py, px + w, py, r);
+      context.closePath();
+      context.fill();
+      context.globalAlpha = 1;
+    },
+  },
+  pixel: {
+    label: 'Pixel Art',
+    boardBg: null,
+    gridColors: null,
+    // Textura pixelada dibujada a mano: sub-cuadrícula en damero + borde marcado.
+    drawBlock(context, x, y, colorIndex, size, alpha) {
+      const color = COLORS[colorIndex];
+      const px = x * size + 1, py = y * size + 1, w = size - 2, h = size - 2;
+      context.globalAlpha = alpha;
+      context.fillStyle = color;
+      context.fillRect(px, py, w, h);
+      const sub = w / 4;
+      context.fillStyle = 'rgba(0,0,0,0.18)';
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          if ((i + j) % 2 === 0) context.fillRect(px + i * sub, py + j * sub, sub, sub);
+        }
+      }
+      context.strokeStyle = 'rgba(0,0,0,0.35)';
+      context.lineWidth = 1;
+      context.strokeRect(px + 0.5, py + 0.5, w - 1, h - 1);
+      context.globalAlpha = 1;
+    },
+  },
+};
 
 // ---- Sistema de habilidades: constantes ----
 const QUEUE_SIZE = 5;        // cantidad de piezas futuras que se mantienen generadas
@@ -52,6 +155,7 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const skinSelect = document.getElementById('skin-select');
 const chargesEl = document.getElementById('charges');
 const skillRowEls = {
   peek: document.querySelector('.skill-row[data-skill="peek"]'),
@@ -62,14 +166,36 @@ const skillRowEls = {
 
 let board, current, queue, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 let theme, gridLineColor;
+let activeSkin = 'retro';
 let skills;
 
 function applyTheme(name) {
   theme = name === 'light' ? 'light' : 'dark';
   document.body.classList.toggle('light-mode', theme === 'light');
-  gridLineColor = GRID_COLORS[theme];
+  updateGridLineColor();
   themeToggleBtn.textContent = theme === 'light' ? '☀️' : '🌙';
   localStorage.setItem('theme', theme);
+}
+
+// Recalcula gridLineColor combinando el tema claro/oscuro con la skin activa:
+// una skin puede pisar el color de grilla del tema (p.ej. Neón); si no lo hace,
+// se usa el color de GRID_COLORS correspondiente al tema.
+function updateGridLineColor() {
+  const skinGrid = SKINS[activeSkin] && SKINS[activeSkin].gridColors;
+  gridLineColor = (skinGrid && skinGrid[theme]) || GRID_COLORS[theme];
+}
+
+// Aplica una skin visual: cambia la estrategia de dibujo de drawBlock, el fondo
+// de los canvases y el color de grilla, sin reiniciar el loop ni la partida.
+function applySkin(name) {
+  activeSkin = SKINS[name] ? name : 'retro';
+  const bg = SKINS[activeSkin].boardBg || '';
+  canvas.style.background = bg;
+  nextCanvas.style.background = bg;
+  queueCanvas.style.background = bg;
+  updateGridLineColor();
+  if (skinSelect) skinSelect.value = activeSkin;
+  localStorage.setItem('skin', activeSkin);
 }
 
 function createBoard() {
@@ -198,14 +324,7 @@ function updateHUD() {
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
   if (!colorIndex) return;
-  const color = COLORS[colorIndex];
-  context.globalAlpha = alpha ?? 1;
-  context.fillStyle = color;
-  context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
-  // highlight
-  context.fillStyle = 'rgba(255,255,255,0.12)';
-  context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
-  context.globalAlpha = 1;
+  SKINS[activeSkin].drawBlock(context, x, y, colorIndex, size, alpha ?? 1);
 }
 
 function drawGrid() {
@@ -491,6 +610,7 @@ function renderSkillsHUD() {
 
 function init() {
   applyTheme(localStorage.getItem('theme') || 'dark');
+  applySkin(localStorage.getItem('skin') || 'retro');
   board = createBoard();
   score = 0;
   lines = 0;
@@ -554,5 +674,6 @@ document.addEventListener('keydown', e => {
 
 restartBtn.addEventListener('click', init);
 themeToggleBtn.addEventListener('click', () => applyTheme(theme === 'light' ? 'dark' : 'light'));
+if (skinSelect) skinSelect.addEventListener('change', e => applySkin(e.target.value));
 
 init();

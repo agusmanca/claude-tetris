@@ -154,6 +154,23 @@ body {
   border-radius: 4px;
 }
 
+/* ---- Selector de skins ---- */
+#skin-select {
+  background: var(--kbd-bg);
+  color: var(--fg);
+  border: 1px solid var(--kbd-border);
+  border-radius: 4px;
+  padding: 5px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+#skin-select:hover {
+  filter: brightness(1.1);
+}
+
 /* ---- Habilidades ---- */
 .skills-list {
   list-style: none;

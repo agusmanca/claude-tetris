@@ -23,7 +23,7 @@ Then open the page (or `http://localhost:8000`) in a browser. Verify changes man
 
 Three files, no modules/bundler:
 
-- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the `#theme-toggle` button, and the pause/game-over overlay.
+- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the `#skin-select` dropdown, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the `#theme-toggle` button, and the pause/game-over overlay.
 - `style.css` — a two-theme system built on CSS custom properties: all colors are declared as `var(--…)` tokens on `:root` (dark, default) and overridden on `body.light-mode` (light). Also defines the `.skill-row` `active`/`disabled` states and `.queue-preview.hidden`.
 - `game.js` — all game logic, organized around a small set of global state variables (`board`, `current`, `queue`, `score`, `lines`, `level`, `paused`, `gameOver`, `dropInterval`, `theme`, `skills`, etc.) and functions operating on them:
   - **Board model**: a `ROWS × COLS` matrix; each cell is `0` (empty) or a piece-color index (1–7).
@@ -71,6 +71,15 @@ A shared charge economy that unlocks four active abilities (keys `1`–`4`), imp
 2. `game.js` — add a `case` in the `keydown` switch calling `skills.activate('<id>')`.
 3. `index.html` — add `<li class="skill-row" data-skill="<id>"><kbd>N</kbd> Label</li>`.
 4. `game.js` — add the matching entry to `skillRowEls` and to the `active` map in `renderSkillsHUD()`.
+
+### Skin system
+
+A Strategy-pattern registry (`SKINS`, `game.js`) that swaps how blocks are drawn on all three canvases at runtime, mirroring the theme toggle:
+
+- **`SKINS` registry**: each entry is `{ label, boardBg, gridColors, drawBlock(context, x, y, colorIndex, size, alpha) }`. `drawBlock(...)` in `game.js` is the single call site for all block rendering (`draw()`, `drawNext()`, `drawQueuePreview()`) and now just guards `colorIndex` and delegates to `SKINS[activeSkin].drawBlock(...)` — its own signature never changes, so none of those callers needed edits. Four skins ship: `retro` (today's flat-color squares, unchanged), `neon` (deep-black canvas background plus `ctx.shadowBlur`/`shadowColor` glow per block, always paired with `context.save()`/`restore()` so the shadow never bleeds into the next block or the grid), `pastel` (a lighter/desaturated `PASTEL_COLORS` palette with hand-rolled rounded corners via `ctx.arcTo`), and `pixel` (a hand-drawn checkerboard sub-grid plus a stroked border to fake pixel-art texture).
+- **`applySkin(name)`** is the skin analog of `applyTheme(name)`: sets `activeSkin`, applies `boardBg` (or clears the inline style back to the CSS `--board-bg` token) to `#board`/`#next-canvas`/`#queue-canvas`, recomputes `gridLineColor` via `updateGridLineColor()`, syncs `#skin-select`, and persists to `localStorage['skin']`; `init()` restores it on load the same way it restores `theme`.
+- **Grid color composition**: `updateGridLineColor()` picks a skin's own `gridColors[theme]` if the skin defines one (Neon does, to keep its grid dark regardless of light/dark theme), otherwise falls back to `GRID_COLORS[theme]`. Both `applyTheme()` and `applySkin()` call it, so changing either theme or skin keeps `gridLineColor` correct without restarting the `requestAnimationFrame` loop — the loop just reads the current `activeSkin`/`gridLineColor` on its next `draw()`.
+- **Adding a new skin**: add an entry to `SKINS` in `game.js` with a `drawBlock()` (and optional `boardBg`/`gridColors`), add a matching `<option>` to `#skin-select` in `index.html`. No changes needed to `draw()`, `drawNext()`, `drawQueuePreview()`, or the game loop.
 
 ## GitHub Actions
 
