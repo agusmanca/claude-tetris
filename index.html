@@ -45,6 +45,16 @@
           </ul>
         </div>
 
+        <div class="panel-section highscores-panel">
+          <span class="label">TOP 5</span>
+          <ol id="sidebar-highscores-list" class="highscores-list"></ol>
+          <div class="highscores-stats">
+            <span>Mejor combo: <strong id="sidebar-best-combo">0</strong></span>
+            <span>Máx. líneas: <strong id="sidebar-max-lines">0</strong></span>
+          </div>
+          <button id="clear-highscores-btn" title="Borra el Top 5, el mejor combo y el máximo de líneas guardados">Borrar récords</button>
+        </div>
+
         <div class="panel-section controls">
           <span class="label">CONTROLS</span>
           <ul>
@@ -65,6 +75,22 @@
       <div class="overlay-box">
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
+
+        <div id="highscore-form" class="highscore-form hidden">
+          <label for="highscore-name-input">¡Nuevo récord! Ingresá tu nombre:</label>
+          <input type="text" id="highscore-name-input" maxlength="12" autocomplete="off" placeholder="JUGADOR" />
+          <button id="highscore-save-btn">Guardar</button>
+        </div>
+
+        <div class="highscores-panel overlay-highscores">
+          <span class="label">TOP 5</span>
+          <ol id="overlay-highscores-list" class="highscores-list"></ol>
+          <div class="highscores-stats">
+            <span>Mejor combo: <strong id="overlay-best-combo">0</strong></span>
+            <span>Máx. líneas: <strong id="overlay-max-lines">0</strong></span>
+          </div>
+        </div>
+
         <button id="restart-btn">Reiniciar</button>
       </div>
     </div>

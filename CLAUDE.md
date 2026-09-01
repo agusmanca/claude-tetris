@@ -23,8 +23,8 @@ Then open the page (or `http://localhost:8000`) in a browser. Verify changes man
 
 Three files, no modules/bundler:
 
-- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the `#theme-toggle` button, and the pause/game-over overlay.
-- `style.css` — a two-theme system built on CSS custom properties: all colors are declared as `var(--…)` tokens on `:root` (dark, default) and overridden on `body.light-mode` (light). Also defines the `.skill-row` `active`/`disabled` states and `.queue-preview.hidden`.
+- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the always-visible TOP 5 sidebar panel (`#sidebar-highscores-list`, `#clear-highscores-btn`), the `#theme-toggle` button, and the pause/game-over overlay (which also holds `#highscore-form` and `#overlay-highscores-list` for the Game Over case).
+- `style.css` — a two-theme system built on CSS custom properties: all colors are declared as `var(--…)` tokens on `:root` (dark, default) and overridden on `body.light-mode` (light). Also defines the `.skill-row` `active`/`disabled` states, `.queue-preview.hidden`, and the `.highscore-row`/`.highscore-new` styles for the records tables.
 - `game.js` — all game logic, organized around a small set of global state variables (`board`, `current`, `queue`, `score`, `lines`, `level`, `paused`, `gameOver`, `dropInterval`, `theme`, `skills`, etc.) and functions operating on them:
   - **Board model**: a `ROWS × COLS` matrix; each cell is `0` (empty) or a piece-color index (1–7).
   - **Pieces**: the 7 tetrominoes are defined as square matrices in `PIECES`. Rotation (`rotateCW`) is done via transpose + row reversal, not stored per-orientation.
@@ -71,6 +71,15 @@ A shared charge economy that unlocks four active abilities (keys `1`–`4`), imp
 2. `game.js` — add a `case` in the `keydown` switch calling `skills.activate('<id>')`.
 3. `index.html` — add `<li class="skill-row" data-skill="<id>"><kbd>N</kbd> Label</li>`.
 4. `game.js` — add the matching entry to `skillRowEls` and to the `active` map in `renderSkillsHUD()`.
+
+### High scores system
+
+A local Top 5 leaderboard plus two historical stats (best combo, max lines), persisted to `localStorage['tetris.highscores']` and implemented in the `HighScores` object plus a small amount of state in `game.js`:
+
+- **Storage shape**: `{ scores: [{name, score, lines, level, date}, ...], bestCombo, maxLines }`, `scores` capped at `MAX_HIGHSCORES` (5) and kept sorted descending by `score`. `HighScores.load()`/`save()`/`clear()` are the only code that touches the key; `load()` never throws — missing data or corrupt/unexpected-shape JSON both fall back to `HighScores.empty()`, following the same defensive-read pattern as `applyTheme`'s `localStorage['theme']`.
+- **Combo tracking**: `combo` (current streak) and `comboBestThisRun` (this game's peak) are plain globals reset in `init()`. `lockPiece()` increments `combo` when `clearLines()` reports `cleared > 0`, resets it to `0` otherwise, and both fields ride along in the Undo snapshot (`saveSnapshot()`/`restoreSnapshot()`) so Undo reverts combo state too — this is independent of the skills charge economy and must not feed it.
+- **Game Over flow**: `endGame()` loads the persisted data, folds in this run's `lines`/`comboBestThisRun` via `Math.max`, and always saves — win or not. If `HighScores.qualifies(data, score)` (fewer than 5 entries, or beats the 5th), it shows `#highscore-form` (a plain `<input>` in the overlay, no `prompt()`) instead of the table; saving the name calls `HighScores.add()` and re-renders with the new row highlighted (`.highscore-new`).
+- **Rendering**: `HighScores.render(els, data, highlightIndex)` is the single render path, called for both the always-visible sidebar panel (`sidebarHsEls`, via `renderSidebarHighScores()`) and the Game Over overlay (`overlayHsEls`). `#clear-highscores-btn` wipes the key after a native `confirm()` and refreshes whichever tables are visible.
 
 ## GitHub Actions
 

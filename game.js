@@ -38,6 +38,10 @@ const CHARGE_PER_SCORE = 1000; // 1 carga cada 1000 puntos
 const PEEK_DURATION_MS = 6000;  // cuánto se muestra la cola extendida
 const SLOW_DURATION_MS = 10000; // duración del efecto de ralentización
 
+// ---- Récords locales: constantes ----
+const HIGHSCORES_KEY = 'tetris.highscores'; // namespace en localStorage
+const MAX_HIGHSCORES = 5;
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -60,9 +64,26 @@ const skillRowEls = {
   undo: document.querySelector('.skill-row[data-skill="undo"]'),
 };
 
+// ---- Récords locales: referencias DOM ----
+const sidebarHsEls = {
+  list: document.getElementById('sidebar-highscores-list'),
+  bestCombo: document.getElementById('sidebar-best-combo'),
+  maxLines: document.getElementById('sidebar-max-lines'),
+};
+const overlayHsEls = {
+  list: document.getElementById('overlay-highscores-list'),
+  bestCombo: document.getElementById('overlay-best-combo'),
+  maxLines: document.getElementById('overlay-max-lines'),
+};
+const clearHsBtn = document.getElementById('clear-highscores-btn');
+const hsFormSection = document.getElementById('highscore-form');
+const hsNameInput = document.getElementById('highscore-name-input');
+const hsSaveBtn = document.getElementById('highscore-save-btn');
+
 let board, current, queue, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 let theme, gridLineColor;
 let skills;
+let combo, comboBestThisRun; // combo actual y mejor combo alcanzado en la partida en curso
 
 function applyTheme(name) {
   theme = name === 'light' ? 'light' : 'dark';
@@ -147,6 +168,7 @@ function clearLines() {
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     updateHUD();
   }
+  return cleared;
 }
 
 function ghostY() {
@@ -175,7 +197,15 @@ function softDrop() {
 function lockPiece() {
   skills.saveSnapshot();
   merge();
-  clearLines();
+  const cleared = clearLines();
+  // Combo: sube mientras se sigan limpiando líneas en fijadas sucesivas,
+  // se resetea apenas una pieza fija sin limpiar ninguna.
+  if (cleared > 0) {
+    combo++;
+    comboBestThisRun = Math.max(comboBestThisRun, combo);
+  } else {
+    combo = 0;
+  }
   spawn();
 }
 
@@ -274,11 +304,165 @@ function drawQueuePreview() {
   });
 }
 
+// ==========================================================================
+// Récords locales: Top 5 + estadísticas históricas (localStorage)
+// ==========================================================================
+const HighScores = {
+  // Estructura vacía, usada como fallback ante ausencia o corrupción de datos.
+  empty() {
+    return { scores: [], bestCombo: 0, maxLines: 0 };
+  },
+
+  // Lee y valida los datos guardados; nunca lanza: ante localStorage vacío o
+  // JSON corrupto/con forma inesperada, devuelve empty() sin romper el juego.
+  load() {
+    try {
+      const raw = localStorage.getItem(HIGHSCORES_KEY);
+      if (!raw) return this.empty();
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.scores)) return this.empty();
+      const scores = parsed.scores
+        .filter(e => e && typeof e.score === 'number')
+        .map(e => ({
+          name: typeof e.name === 'string' && e.name ? e.name.slice(0, 12) : '???',
+          score: e.score,
+          lines: typeof e.lines === 'number' ? e.lines : 0,
+          level: typeof e.level === 'number' ? e.level : 1,
+          date: typeof e.date === 'string' ? e.date : '',
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, MAX_HIGHSCORES);
+      return {
+        scores,
+        bestCombo: typeof parsed.bestCombo === 'number' ? parsed.bestCombo : 0,
+        maxLines: typeof parsed.maxLines === 'number' ? parsed.maxLines : 0,
+      };
+    } catch {
+      return this.empty();
+    }
+  },
+
+  save(data) {
+    try {
+      localStorage.setItem(HIGHSCORES_KEY, JSON.stringify(data));
+    } catch {
+      // localStorage puede fallar (modo privado, cuota excedida, etc.): el
+      // juego sigue funcionando, simplemente no persiste el récord.
+    }
+  },
+
+  clear() {
+    try { localStorage.removeItem(HIGHSCORES_KEY); } catch {}
+    return this.empty();
+  },
+
+  // ¿Esta puntuación entra al Top 5?
+  qualifies(data, score) {
+    return data.scores.length < MAX_HIGHSCORES || score > data.scores[data.scores.length - 1].score;
+  },
+
+  // Inserta la entrada, reordena desc por score y recorta a MAX_HIGHSCORES.
+  // Devuelve el índice de la entrada insertada (para resaltarla al renderizar),
+  // o -1 si terminó quedando fuera del Top 5 (empates en el límite).
+  add(data, entry) {
+    data.scores.push(entry);
+    data.scores.sort((a, b) => b.score - a.score);
+    data.scores = data.scores.slice(0, MAX_HIGHSCORES);
+    return data.scores.indexOf(entry);
+  },
+
+  // Renderiza la tabla Top 5 + estadísticas en los elementos DOM indicados.
+  // `highlightIndex` (opcional) resalta la fila recién ingresada.
+  render(els, data, highlightIndex) {
+    if (els.list) {
+      els.list.innerHTML = '';
+      if (data.scores.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'highscore-empty';
+        li.textContent = 'Sin récords todavía';
+        els.list.appendChild(li);
+      } else {
+        data.scores.forEach((entry, i) => {
+          const li = document.createElement('li');
+          li.className = 'highscore-row' + (i === highlightIndex ? ' highscore-new' : '');
+          li.title = `Nivel ${entry.level} · ${entry.lines} líneas`;
+          const name = document.createElement('span');
+          name.className = 'highscore-name';
+          name.textContent = entry.name;
+          const val = document.createElement('span');
+          val.className = 'highscore-value';
+          val.textContent = entry.score.toLocaleString();
+          li.appendChild(name);
+          li.appendChild(val);
+          els.list.appendChild(li);
+        });
+      }
+    }
+    if (els.bestCombo) els.bestCombo.textContent = data.bestCombo;
+    if (els.maxLines) els.maxLines.textContent = data.maxLines;
+  },
+};
+
+function renderSidebarHighScores() {
+  HighScores.render(sidebarHsEls, HighScores.load(), -1);
+}
+
+// Muestra el formulario para ingresar el nombre cuando la partida entra al
+// Top 5, y engancha el guardado (botón + Enter en el input).
+function showHighScoreForm(data) {
+  hsFormSection.classList.remove('hidden');
+  hsNameInput.value = '';
+  HighScores.render(overlayHsEls, data, -1);
+  hsNameInput.focus();
+
+  hsSaveBtn.onclick = () => {
+    const name = (hsNameInput.value || '').trim().slice(0, 12) || 'JUGADOR';
+    const entry = { name, score, lines, level, date: new Date().toISOString() };
+    const fresh = HighScores.load();
+    fresh.maxLines = Math.max(fresh.maxLines, lines);
+    fresh.bestCombo = Math.max(fresh.bestCombo, comboBestThisRun);
+    const idx = HighScores.add(fresh, entry);
+    HighScores.save(fresh);
+    hsFormSection.classList.add('hidden');
+    HighScores.render(overlayHsEls, fresh, idx);
+    renderSidebarHighScores();
+  };
+}
+
+hsNameInput.addEventListener('keydown', e => {
+  if (e.code === 'Enter') hsSaveBtn.click();
+});
+
+clearHsBtn.addEventListener('click', () => {
+  if (!confirm('¿Borrar todos los récords y estadísticas guardadas? Esta acción no se puede deshacer.')) return;
+  const data = HighScores.clear();
+  renderSidebarHighScores();
+  // Si el overlay de Game Over está visible, refrescamos también su tabla.
+  if (gameOver && !overlay.classList.contains('hidden')) {
+    HighScores.render(overlayHsEls, data, -1);
+  }
+});
+
 function endGame() {
   gameOver = true;
   cancelAnimationFrame(animId);
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
+
+  const data = HighScores.load();
+  data.maxLines = Math.max(data.maxLines, lines);
+  data.bestCombo = Math.max(data.bestCombo, comboBestThisRun);
+
+  if (HighScores.qualifies(data, score)) {
+    HighScores.save(data); // persistimos combo/líneas ya, el nombre se agrega al guardar el formulario
+    showHighScoreForm(data);
+  } else {
+    HighScores.save(data);
+    hsFormSection.classList.add('hidden');
+    HighScores.render(overlayHsEls, data, -1);
+  }
+  renderSidebarHighScores();
+
   overlay.classList.remove('hidden');
 }
 
@@ -451,7 +635,7 @@ class SkillManager {
       board: packBoard(board),
       piece: { type: current.type, shape: current.shape.map(row => [...row]), x: current.x, y: current.y },
       queue: queue.map(p => ({ type: p.type, shape: p.shape.map(row => [...row]), x: p.x, y: p.y })),
-      score, lines, level, dropInterval,
+      score, lines, level, dropInterval, combo, comboBestThisRun,
     };
   }
 
@@ -465,6 +649,8 @@ class SkillManager {
     lines = snap.lines;
     level = snap.level;
     dropInterval = snap.dropInterval;
+    combo = snap.combo;
+    comboBestThisRun = snap.comboBestThisRun;
     this.snapshot = null; // no encadenable: solo revierte la última jugada
     drawNext();
     return true;
@@ -500,6 +686,8 @@ function init() {
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
+  combo = 0;
+  comboBestThisRun = 0;
   skills = new SkillManager({
     maxCharges: MAX_CHARGES,
     chargePerLines: CHARGE_PER_LINES,
@@ -511,6 +699,8 @@ function init() {
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
+  hsFormSection.classList.add('hidden');
+  renderSidebarHighScores();
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
