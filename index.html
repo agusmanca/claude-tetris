@@ -34,6 +34,17 @@
           <canvas id="next-canvas" width="120" height="120"></canvas>
         </div>
 
+        <div class="panel-section">
+          <span class="label">SKILLS</span>
+          <span class="value" id="charges">0/3</span>
+          <ul class="skills-list">
+            <li class="skill-row" data-skill="peek"><kbd>1</kbd> Ver 5</li>
+            <li class="skill-row" data-skill="swap"><kbd>2</kbd> Swap</li>
+            <li class="skill-row" data-skill="slow"><kbd>3</kbd> Slow 10s</li>
+            <li class="skill-row" data-skill="undo"><kbd>4</kbd> Undo</li>
+          </ul>
+        </div>
+
         <div class="panel-section controls">
           <span class="label">CONTROLS</span>
           <ul>
@@ -42,9 +53,12 @@
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
             <li><kbd>P</kbd> pausa</li>
+            <li><kbd>1</kbd>-<kbd>4</kbd> habilidades</li>
           </ul>
         </div>
       </aside>
+
+      <canvas id="queue-canvas" class="queue-preview hidden" width="120" height="260"></canvas>
     </div>
 
     <div id="overlay" class="overlay hidden">

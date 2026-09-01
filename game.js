@@ -30,10 +30,20 @@ const LINE_SCORES = [0, 100, 300, 500, 800];
 
 const GRID_COLORS = { dark: '#22222e', light: '#d6d6e2' };
 
+// ---- Sistema de habilidades: constantes ----
+const QUEUE_SIZE = 5;        // cantidad de piezas futuras que se mantienen generadas
+const MAX_CHARGES = 3;       // tope de cargas acumulables en el pool compartido
+const CHARGE_PER_LINES = 8;  // 1 carga cada 8 líneas completadas
+const CHARGE_PER_SCORE = 1000; // 1 carga cada 1000 puntos
+const PEEK_DURATION_MS = 6000;  // cuánto se muestra la cola extendida
+const SLOW_DURATION_MS = 10000; // duración del efecto de ralentización
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
 const nextCtx = nextCanvas.getContext('2d');
+const queueCanvas = document.getElementById('queue-canvas');
+const queueCtx = queueCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
@@ -42,9 +52,17 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const chargesEl = document.getElementById('charges');
+const skillRowEls = {
+  peek: document.querySelector('.skill-row[data-skill="peek"]'),
+  swap: document.querySelector('.skill-row[data-skill="swap"]'),
+  slow: document.querySelector('.skill-row[data-skill="slow"]'),
+  undo: document.querySelector('.skill-row[data-skill="undo"]'),
+};
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, queue, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 let theme, gridLineColor;
+let skills;
 
 function applyTheme(name) {
   theme = name === 'light' ? 'light' : 'dark';
@@ -58,10 +76,17 @@ function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
-function randomPiece() {
-  const type = Math.floor(Math.random() * 7) + 1;
+function randomPiece(excludeType) {
+  let type;
+  do {
+    type = Math.floor(Math.random() * 7) + 1;
+  } while (type === excludeType);
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function refillQueue() {
+  while (queue.length < QUEUE_SIZE) queue.push(randomPiece());
 }
 
 function collide(shape, ox, oy) {
@@ -148,14 +173,15 @@ function softDrop() {
 }
 
 function lockPiece() {
+  skills.saveSnapshot();
   merge();
   clearLines();
   spawn();
 }
 
 function spawn() {
-  current = next;
-  next = randomPiece();
+  current = queue.shift();
+  refillQueue();
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
@@ -166,6 +192,8 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  skills.syncCharges(lines, score);
+  renderSkillsHUD();
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -222,12 +250,28 @@ function draw() {
 function drawNext() {
   const NB = 30;
   nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
-  const shape = next.shape;
+  const shape = queue[0].shape;
   const offX = Math.floor((4 - shape[0].length) / 2);
   const offY = Math.floor((4 - shape.length) / 2);
   for (let r = 0; r < shape.length; r++)
     for (let c = 0; c < shape[r].length; c++)
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
+}
+
+// Dibuja las QUEUE_SIZE piezas siguientes apiladas verticalmente (habilidad "Ver siguientes 5").
+function drawQueuePreview() {
+  const QB = 22;
+  const slotH = 52;
+  queueCtx.clearRect(0, 0, queueCanvas.width, queueCanvas.height);
+  queue.forEach((piece, i) => {
+    const shape = piece.shape;
+    const offX = Math.floor((4 - shape[0].length) / 2);
+    const offY = Math.floor((4 - shape.length) / 2);
+    const baseY = i * slotH / QB;
+    for (let r = 0; r < shape.length; r++)
+      for (let c = 0; c < shape[r].length; c++)
+        drawBlock(queueCtx, offX + c, baseY + offY + r, shape[r][c], QB);
+  });
 }
 
 function endGame() {
@@ -256,7 +300,9 @@ function loop(ts) {
   const dt = ts - lastTime;
   lastTime = ts;
   dropAccum += dt;
-  if (dropAccum >= dropInterval) {
+  const wasPeeking = performance.now() < skills.peekUntil;
+  const wasSlowing = performance.now() < skills.slowUntil;
+  if (dropAccum >= effectiveDropInterval(ts)) {
     dropAccum = 0;
     if (!collide(current.shape, current.x, current.y + 1)) {
       current.y++;
@@ -265,8 +311,182 @@ function loop(ts) {
     }
   }
   if(gameOver) return;
+  // Si un efecto temporal (peek/slow) acaba de expirar, refrescamos el HUD/panel una sola vez.
+  const now = performance.now();
+  if (wasPeeking && now >= skills.peekUntil) {
+    queueCanvas.classList.add('hidden');
+  }
+  if (wasSlowing && now >= skills.slowUntil) {
+    renderSkillsHUD();
+  }
   draw();
   animId = requestAnimationFrame(loop);
+}
+
+// ==========================================================================
+// Sistema de habilidades cargables
+// ==========================================================================
+
+// El tablero (matriz de arrays) se empaqueta en un Uint8Array plano para que
+// el snapshot de Undo sea compacto (ROWS*COLS bytes) y su copia sea O(n) trivial.
+function packBoard(b) {
+  const flat = new Uint8Array(ROWS * COLS);
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      flat[r * COLS + c] = b[r][c];
+  return flat;
+}
+
+function unpackBoard(flat) {
+  const b = createBoard();
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      b[r][c] = flat[r * COLS + c];
+  return b;
+}
+
+// Devuelve el dropInterval "efectivo" en este instante, aplicando el efecto
+// de ralentización si está activo, sin tocar el dropInterval real (que sigue
+// siendo la fuente de verdad del nivel, recalculado en clearLines()).
+function effectiveDropInterval(now) {
+  return now < skills.slowUntil ? dropInterval * 2 : dropInterval;
+}
+
+// Definición de las 4 habilidades: cada una es una función desacoplada que
+// devuelve `true` si pudo aplicarse (consume 1 carga) o `false` si no
+// (la carga no se descuenta).
+const SKILLS = {
+  peek: {
+    key: 'Digit1',
+    label: 'Ver 5',
+    run() {
+      skills.peekUntil = performance.now() + PEEK_DURATION_MS;
+      drawQueuePreview();
+      queueCanvas.classList.remove('hidden');
+      return true;
+    },
+  },
+  swap: {
+    key: 'Digit2',
+    label: 'Swap',
+    run() {
+      const candidate = randomPiece(current.type);
+      const kicks = [0, -1, 1, -2, 2];
+      for (const kick of kicks) {
+        const x = current.x + kick;
+        const y = collide(candidate.shape, x, current.y) ? 0 : current.y;
+        if (!collide(candidate.shape, x, y)) {
+          current.type = candidate.type;
+          current.shape = candidate.shape;
+          current.x = x;
+          current.y = y;
+          return true;
+        }
+      }
+      return false; // no hay ninguna posición válida para la nueva pieza
+    },
+  },
+  slow: {
+    key: 'Digit3',
+    label: 'Slow 10s',
+    run() {
+      skills.slowUntil = performance.now() + SLOW_DURATION_MS;
+      return true;
+    },
+  },
+  undo: {
+    key: 'Digit4',
+    label: 'Undo',
+    run() {
+      return skills.restoreSnapshot();
+    },
+  },
+};
+
+class SkillManager {
+  constructor({ maxCharges, chargePerLines, chargePerScore }) {
+    this.maxCharges = maxCharges;
+    this.chargePerLines = chargePerLines;
+    this.chargePerScore = chargePerScore;
+    this.reset();
+  }
+
+  reset() {
+    this.charges = 0;
+    this.grantedFromLines = 0;
+    this.grantedFromScore = 0;
+    this.peekUntil = 0;
+    this.slowUntil = 0;
+    this.snapshot = null;
+  }
+
+  // Otorga cargas nuevas de forma idempotente: usa contadores acumulativos
+  // (nunca retrocede con Math.max) para que un Undo -que baja score/lines-
+  // no permita "farmear" cargas repitiendo fijar+deshacer la misma jugada.
+  syncCharges(currentLines, currentScore) {
+    const earnedFromLines = Math.floor(currentLines / this.chargePerLines);
+    const earnedFromScore = Math.floor(currentScore / this.chargePerScore);
+    const gain = (earnedFromLines - this.grantedFromLines) + (earnedFromScore - this.grantedFromScore);
+    if (gain > 0) this.charges = Math.min(this.maxCharges, this.charges + gain);
+    this.grantedFromLines = Math.max(this.grantedFromLines, earnedFromLines);
+    this.grantedFromScore = Math.max(this.grantedFromScore, earnedFromScore);
+  }
+
+  activate(id) {
+    if (paused || gameOver) return false;
+    const skill = SKILLS[id];
+    if (!skill || this.charges < 1) return false;
+    const applied = skill.run();
+    if (applied) {
+      this.charges--;
+      updateHUD();
+    }
+    return applied;
+  }
+
+  // Guarda un snapshot compacto justo antes de fijar la pieza actual, con la
+  // pieza en la posición previa al lock (no re-spawneada) para poder devolverla al juego.
+  saveSnapshot() {
+    this.snapshot = {
+      board: packBoard(board),
+      piece: { type: current.type, shape: current.shape.map(row => [...row]), x: current.x, y: current.y },
+      queue: queue.map(p => ({ type: p.type, shape: p.shape.map(row => [...row]), x: p.x, y: p.y })),
+      score, lines, level, dropInterval,
+    };
+  }
+
+  restoreSnapshot() {
+    const snap = this.snapshot;
+    if (!snap) return false;
+    board = unpackBoard(snap.board);
+    current = { type: snap.piece.type, shape: snap.piece.shape.map(row => [...row]), x: snap.piece.x, y: snap.piece.y };
+    queue = snap.queue.map(p => ({ type: p.type, shape: p.shape.map(row => [...row]), x: p.x, y: p.y }));
+    score = snap.score;
+    lines = snap.lines;
+    level = snap.level;
+    dropInterval = snap.dropInterval;
+    this.snapshot = null; // no encadenable: solo revierte la última jugada
+    drawNext();
+    return true;
+  }
+}
+
+// Refleja cargas y estado de cada habilidad en el panel lateral.
+function renderSkillsHUD() {
+  chargesEl.textContent = `${skills.charges}/${skills.maxCharges}`;
+  const now = performance.now();
+  const active = {
+    peek: now < skills.peekUntil,
+    swap: false,
+    slow: now < skills.slowUntil,
+    undo: !!skills.snapshot,
+  };
+  for (const id in skillRowEls) {
+    const el = skillRowEls[id];
+    if (!el) continue;
+    el.classList.toggle('active', active[id]);
+    el.classList.toggle('disabled', skills.charges < 1 && !active[id]);
+  }
 }
 
 function init() {
@@ -280,7 +500,14 @@ function init() {
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
-  next = randomPiece();
+  skills = new SkillManager({
+    maxCharges: MAX_CHARGES,
+    chargePerLines: CHARGE_PER_LINES,
+    chargePerScore: CHARGE_PER_SCORE,
+  });
+  queueCanvas.classList.add('hidden');
+  queue = [];
+  refillQueue();
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
@@ -308,6 +535,18 @@ document.addEventListener('keydown', e => {
     case 'Space':
       e.preventDefault();
       hardDrop();
+      break;
+    case 'Digit1':
+      skills.activate('peek');
+      break;
+    case 'Digit2':
+      skills.activate('swap');
+      break;
+    case 'Digit3':
+      skills.activate('slow');
+      break;
+    case 'Digit4':
+      skills.activate('undo');
       break;
   }
   updateHUD();

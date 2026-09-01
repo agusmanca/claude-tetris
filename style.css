@@ -154,6 +154,50 @@ body {
   border-radius: 4px;
 }
 
+/* ---- Habilidades ---- */
+.skills-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-row {
+  font-size: 12px;
+  color: var(--control-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.4;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.skill-row.disabled {
+  opacity: 0.25;
+}
+
+.skill-row:not(.disabled) {
+  opacity: 1;
+}
+
+.skill-row.active {
+  color: var(--value-color);
+  opacity: 1;
+  font-weight: 700;
+}
+
+.queue-preview {
+  display: block;
+  border: 1px solid var(--board-border);
+  background: var(--board-bg);
+  border-radius: 4px;
+  align-self: flex-start;
+}
+
+.queue-preview.hidden {
+  display: none;
+}
+
 /* ---- Controles ---- */
 .controls ul {
   list-style: none;
