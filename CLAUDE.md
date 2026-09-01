@@ -23,7 +23,7 @@ Then open the page (or `http://localhost:8000`) in a browser. Verify changes man
 
 Three files, no modules/bundler:
 
-- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the `#theme-toggle` button, and the pause/game-over overlay.
+- `index.html` — DOM structure: the `#board` canvas (300×600, i.e. `COLS×BLOCK` by `ROWS×BLOCK`), the `#next-canvas` preview, the `#queue-canvas` (hidden 5-piece lookahead used by the Peek skill), the score/lines/level panel, the SKILLS panel (`#charges` plus one `<li class="skill-row" data-skill="...">` per skill), the `#theme-toggle` button, the Game Over `#overlay`, and the dedicated pause menu `#pause-menu` (see "Pause system" below).
 - `style.css` — a two-theme system built on CSS custom properties: all colors are declared as `var(--…)` tokens on `:root` (dark, default) and overridden on `body.light-mode` (light). Also defines the `.skill-row` `active`/`disabled` states and `.queue-preview.hidden`.
 - `game.js` — all game logic, organized around a small set of global state variables (`board`, `current`, `queue`, `score`, `lines`, `level`, `paused`, `gameOver`, `dropInterval`, `theme`, `skills`, etc.) and functions operating on them:
   - **Board model**: a `ROWS × COLS` matrix; each cell is `0` (empty) or a piece-color index (1–7).
@@ -71,6 +71,12 @@ A shared charge economy that unlocks four active abilities (keys `1`–`4`), imp
 2. `game.js` — add a `case` in the `keydown` switch calling `skills.activate('<id>')`.
 3. `index.html` — add `<li class="skill-row" data-skill="<id>"><kbd>N</kbd> Label</li>`.
 4. `game.js` — add the matching entry to `skillRowEls` and to the `active` map in `renderSkillsHUD()`.
+
+### Pause system
+
+`openPauseMenu()`/`closePauseMenu()` are the single source of truth for whether the pause menu is open — they keep `paused` synced with the visibility of `#pause-menu`, a dedicated overlay kept separate from the Game Over `#overlay` (a different in-flight change touches that one, for high scores) so the two don't collide on merge. `togglePause()` just picks whichever of the two applies and is still what `KeyP` and `Escape` both call from the `keydown` listener; both are checked ahead of the `if (paused || gameOver) return;` guard so they always work, and that same guard (unchanged) is what keeps every other key inert while the menu is open.
+
+The menu itself, all inside `#pause-menu`: a **Reanudar** button (`closePauseMenu`), a **Reiniciar** button (`init()` — never `location.reload()`), a native `<details>`/`<summary>` "Ver Controles" block that repeats the same key list as the sidebar, and a **Nivel Inicial** `<select>` (`#start-level-select`, values `MIN_START_LEVEL`–`MAX_START_LEVEL`). The select persists to `localStorage['startLevel']` via `getStartLevel()`/`setStartLevel()`, following the same read-on-`init()` pattern as `applyTheme()`/`localStorage['theme']`. `init()` seeds `level` from `getStartLevel()` and derives `dropInterval` from the existing formula (`Math.max(100, 1000 - (level - 1) * 90)`) instead of hardcoding it, so a chosen start level plays at the correct speed from piece one; `lines` still starts at 0.
 
 ## GitHub Actions
 

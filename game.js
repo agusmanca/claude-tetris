@@ -38,6 +38,10 @@ const CHARGE_PER_SCORE = 1000; // 1 carga cada 1000 puntos
 const PEEK_DURATION_MS = 6000;  // cuánto se muestra la cola extendida
 const SLOW_DURATION_MS = 10000; // duración del efecto de ralentización
 
+// ---- Sistema de pausa: constantes ----
+const MIN_START_LEVEL = 1;  // rango permitido para el nivel inicial elegible en el menú de pausa
+const MAX_START_LEVEL = 10;
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -59,6 +63,10 @@ const skillRowEls = {
   slow: document.querySelector('.skill-row[data-skill="slow"]'),
   undo: document.querySelector('.skill-row[data-skill="undo"]'),
 };
+const pauseMenu = document.getElementById('pause-menu');
+const resumeBtn = document.getElementById('resume-btn');
+const pauseRestartBtn = document.getElementById('pause-restart-btn');
+const startLevelSelect = document.getElementById('start-level-select');
 
 let board, current, queue, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
 let theme, gridLineColor;
@@ -282,18 +290,45 @@ function endGame() {
   overlay.classList.remove('hidden');
 }
 
+// ==========================================================================
+// Sistema de pausa
+// ==========================================================================
+// openPauseMenu()/closePauseMenu() son la única fuente de verdad de si el
+// menú de pausa está abierto: mantienen `paused` sincronizado con la
+// visibilidad de #pause-menu, un overlay independiente del #overlay de
+// Game Over (para no chocar con él en el merge).
+
+function getStartLevel() {
+  const stored = parseInt(localStorage.getItem('startLevel'), 10);
+  if (Number.isInteger(stored) && stored >= MIN_START_LEVEL && stored <= MAX_START_LEVEL) return stored;
+  return MIN_START_LEVEL;
+}
+
+function setStartLevel(value) {
+  const clamped = Math.min(MAX_START_LEVEL, Math.max(MIN_START_LEVEL, parseInt(value, 10) || MIN_START_LEVEL));
+  localStorage.setItem('startLevel', clamped);
+  return clamped;
+}
+
+function openPauseMenu() {
+  if (gameOver || paused) return;
+  paused = true;
+  cancelAnimationFrame(animId);
+  pauseMenu.classList.remove('hidden');
+}
+
+function closePauseMenu() {
+  if (!paused) return;
+  paused = false;
+  pauseMenu.classList.add('hidden');
+  lastTime = performance.now();
+  loop(lastTime);
+}
+
 function togglePause() {
   if (gameOver) return;
-  paused = !paused;
-  if (!paused) {
-    lastTime = performance.now();
-    loop(lastTime);
-  } else {
-    cancelAnimationFrame(animId);
-    overlayTitle.textContent = 'PAUSA';
-    overlayScore.textContent = '';
-    overlay.classList.remove('hidden');
-  }
+  if (paused) closePauseMenu();
+  else openPauseMenu();
 }
 
 function loop(ts) {
@@ -494,10 +529,11 @@ function init() {
   board = createBoard();
   score = 0;
   lines = 0;
-  level = 1;
+  level = getStartLevel();
+  startLevelSelect.value = level;
   paused = false;
   gameOver = false;
-  dropInterval = 1000;
+  dropInterval = Math.max(100, 1000 - (level - 1) * 90);
   dropAccum = 0;
   lastTime = performance.now();
   skills = new SkillManager({
@@ -511,12 +547,13 @@ function init() {
   spawn();
   updateHUD();
   overlay.classList.add('hidden');
+  pauseMenu.classList.add('hidden');
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
 document.addEventListener('keydown', e => {
-  if (e.code === 'KeyP') { togglePause(); return; }
+  if (e.code === 'KeyP' || e.code === 'Escape') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
     case 'ArrowLeft':
@@ -554,5 +591,10 @@ document.addEventListener('keydown', e => {
 
 restartBtn.addEventListener('click', init);
 themeToggleBtn.addEventListener('click', () => applyTheme(theme === 'light' ? 'dark' : 'light'));
+resumeBtn.addEventListener('click', closePauseMenu);
+pauseRestartBtn.addEventListener('click', init);
+startLevelSelect.addEventListener('change', () => {
+  startLevelSelect.value = setStartLevel(startLevelSelect.value);
+});
 
 init();
