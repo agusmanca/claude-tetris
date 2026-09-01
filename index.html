@@ -52,7 +52,7 @@
             <li><kbd>↑</kbd> rotar</li>
             <li><kbd>↓</kbd> bajar</li>
             <li><kbd>Space</kbd> caída</li>
-            <li><kbd>P</kbd> pausa</li>
+            <li><kbd>P</kbd> / <kbd>Esc</kbd> pausa</li>
             <li><kbd>1</kbd>-<kbd>4</kbd> habilidades</li>
           </ul>
         </div>
@@ -66,6 +66,44 @@
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
         <button id="restart-btn">Reiniciar</button>
+      </div>
+    </div>
+
+    <!-- Overlay de pausa: deliberadamente separado del #overlay de Game Over
+         (ver CLAUDE.md, sección "Sistema de pausa") para no chocar con él. -->
+    <div id="pause-menu" class="overlay hidden">
+      <div class="overlay-box pause-box">
+        <p id="pause-title">PAUSA</p>
+        <button id="resume-btn" class="overlay-btn">Reanudar</button>
+        <button id="pause-restart-btn" class="overlay-btn">Reiniciar</button>
+
+        <div class="start-level-row">
+          <span class="label">NIVEL INICIAL</span>
+          <select id="start-level-select">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+          </select>
+        </div>
+
+        <details class="pause-controls">
+          <summary>Ver Controles</summary>
+          <ul>
+            <li><kbd>←</kbd><kbd>→</kbd> mover</li>
+            <li><kbd>↑</kbd> rotar</li>
+            <li><kbd>↓</kbd> bajar</li>
+            <li><kbd>Space</kbd> caída</li>
+            <li><kbd>P</kbd> / <kbd>Esc</kbd> pausa</li>
+            <li><kbd>1</kbd>-<kbd>4</kbd> habilidades</li>
+          </ul>
+        </details>
       </div>
     </div>
   </div>
